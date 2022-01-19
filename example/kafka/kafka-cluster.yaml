@@ -1,0 +1,140 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: my-cluster
+spec:
+  kafka:
+    replicas: 3   # 副本节点的数量
+    version: 3.0.0   # Kafka 版本
+    logging: # 日志配置
+      type: inline
+      loggers:
+        kafka.root.logger.level: "INFO"  # 选项：NFO、ERROR、WARN、TRACE、DEBUG、FATAL 或 OFF
+    resources: #  资源限制
+      requests:
+        memory: 64Gi
+        cpu: "8"
+      limits:
+        memory: 64Gi
+        cpu: "12"
+    readinessProbe:  # 健康检查， 以了解何时重新启动容器
+      initialDelaySeconds: 15
+      timeoutSeconds: 5
+    livenessProbe:
+      initialDelaySeconds: 15
+      timeoutSeconds: 5
+    jvmOptions: # kafka 的 JVM 配置选项
+      -Xms: 8192m
+      -Xmx: 8192m
+    image: my-org/my-image:latest # kafka 容器镜像
+    listeners:        # 侦听器配置客户端如何通过引导地址连接到 Kafka 集群， 侦听器被配置为内部或外部侦听器，用于从 Kubernetes 集群内部或外部进行连接。
+    - name: plain     #  侦听器名称，在 Kafka 集群中必须是唯一的
+      port: 9092      # Kafka 内部监听器使用的端口号。端口号在给定的 Kafka 集群中必须是唯一的。允许的端口号为 9092 或更高，但已用于 Prometheus 和 JMX 的端口 9404 和 9999 除外。根据侦听器类型，端口号可能与连接 Kafka 客户端的端口号不同
+      type: internal  # 指定为 或 外部侦听器的侦听器类型internal为route、loadbalancer或。nodeportingress
+      tls: false      # 为每个侦听器启用 TLS 加密。默认为false。route侦听器不需要 TLS 加密。
+      configuration:
+        useServiceDnsDomain: true   # .cluster.local定义是否分配包含集群服务后缀（通常是 ）的全路径 DNS 名称
+    - name: tls
+      port: 9093
+      type: internal
+      tls: true
+      authentication:     # 侦听器身份验证机制指定为双向 TLS、SCRAM-SHA-512 或基于令牌的 OAuth 2.0
+        type: tls
+    - name: external # 外部侦听器配置指定Kafka 集群如何在 Kubernetes 外部公开，例如通过route、loadbalancer 或 nodeport
+      port: 9094
+      type: route
+      tls: true
+      configuration:
+        brokerCertChainAndKey:   # 可选， brokerCertChainAndKey指定Secret包含服务器证书和私钥的
+          secretName: my-secret
+          certificate: my-certificate.crt
+          key: my-key.key
+    authorization:   # 授权在 Kafka 代理上启用简单的 OAUTH 2.0 或 OPA 授权。简单授权使用AclAuthorizerKafka 插件。
+      type: simple
+    config:   # config指定代理配置。可以提供标准 Apache Kafka 配置，仅限于那些不由 Strimzi 直接管理的属性
+      auto.create.topics.enable: "false"
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      inter.broker.protocol.version: 3.0
+      ssl.cipher.suites: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"   # 启用了 TLS 加密以启用特定密码套件或 TLS 版本的侦听器的 SSL 属性
+      ssl.enabled.protocols: "TLSv1.2"
+      ssl.protocol: "TLSv1.2"
+    storage:   # 存储配置
+      type: persistent-claim   # 存储配置为ephemeral或 persistent-claim 或 jbod
+      size: 10000Gi
+    rack:    # 节点选择配置
+      topologyKey: topology.kubernetes.io/zone
+    metricsConfig:   # Prometheus 指标， 在此示例中，为 Prometheus JMX Exporter（默认指标导出器）配置了指标
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:    # 通过 Prometheus JMX Exporter 将指标导出到 Grafana 仪表板的 Prometheus 规则，通过引用包含 Prometheus JMX 导出器配置的 ConfigMap 来启用这些规则。您可以使用对包含空文件的 ConfigMap 的引用来启用指标，而无需进一步配置metricsConfig.valueFrom.configMapKeyRef.key
+          name: my-config-map
+          key: my-key
+    # ...
+  zookeeper:    # zookeeper 相关配置
+    replicas: 3     # 副本数， 基数
+    logging:   # 指定ZooKeeper 记录器和日志级别。
+      type: inline
+      loggers:
+        zookeeper.root.logger: "INFO"
+    resources:
+      requests:
+        memory: 8Gi
+        cpu: "2"
+      limits:
+        memory: 8Gi
+        cpu: "2"
+    jvmOptions:
+      -Xms: 4096m
+      -Xmx: 4096m
+    storage:
+      type: persistent-claim
+      size: 1000Gi
+    metricsConfig:
+    # ...
+  entityOperator:   # Entity Operator 配置，指定 Topic Operator 和 User Operator 的配置。
+    tlsSidecar:     # Entity Operator 的 TLS 边车配置。Entity Operator 使用 TLS sidecar 与 ZooKeeper 进行安全通信
+      resources:
+        requests:
+          cpu: 200m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 128Mi
+    topicOperator:
+      watchedNamespace: my-topic-namespace   # 监视的 Kubernetes 命名空间KafkaTopics。默认是部署 Kafka 集群的命名空间。
+      reconciliationIntervalSeconds: 60
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: "INFO"
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: "1"
+        limits:
+          memory: 512Mi
+          cpu: "1"
+    userOperator:
+      watchedNamespace: my-topic-namespace
+      reconciliationIntervalSeconds: 60
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: INFO
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: "1"
+        limits:
+          memory: 512Mi
+          cpu: "1"
+  kafkaExporter: # kafka exporter 配置
+  # ...
+  cruiseControl:  # Cruise Control 的可选配置，用于重新平衡 Kafka 集群。
+    # ...
+    tlsSidecar:   # Cruise Control 使用 TLS sidecar 与 ZooKeeper 进行安全通信。
+    # ...
